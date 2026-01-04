@@ -1,11 +1,16 @@
 'use server'
 
-import fs from 'fs/promises'
-import path from 'path'
+import { Octokit } from '@octokit/rest'
 import { revalidatePath } from 'next/cache'
 
-const DATA_FILE_PATH = path.join(process.cwd(), 'data', 'projects.json')
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads')
+const GITHUB_OWNER = process.env.GITHUB_OWNER || 'nejadmanesh'
+const GITHUB_REPO = process.env.GITHUB_REPO || 'snayea_choub'
+const GITHUB_BRANCH = 'main'
+
+// Initialize Octokit with the token
+const octokit = new Octokit({
+  auth: process.env.GITHUB_TOKEN,
+})
 
 export type Project = {
   id: string
@@ -15,21 +20,50 @@ export type Project = {
   category: string
 }
 
-async function ensureDataFile() {
+async function getFileSha(path: string) {
   try {
-    await fs.access(DATA_FILE_PATH)
-  } catch {
-    await fs.writeFile(DATA_FILE_PATH, '[]', 'utf-8')
+    const { data } = await octokit.repos.getContent({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path,
+      ref: GITHUB_BRANCH,
+    })
+    
+    if (Array.isArray(data)) return null
+    return (data as any).sha
+  } catch (e) {
+    return null
   }
 }
 
 export async function getProjects(): Promise<Project[]> {
-  await ensureDataFile()
-  const data = await fs.readFile(DATA_FILE_PATH, 'utf-8')
-  return JSON.parse(data)
+  try {
+    // Try to fetch from GitHub API first for fresh data (Admin panel needs this)
+    const { data } = await octokit.repos.getContent({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path: 'data/projects.json',
+      ref: GITHUB_BRANCH,
+    })
+
+    if (Array.isArray(data) || !('content' in data)) {
+      return []
+    }
+
+    const content = Buffer.from(data.content, 'base64').toString('utf-8')
+    return JSON.parse(content)
+  } catch (error) {
+    console.error('Error fetching projects from GitHub:', error)
+    // Fallback to empty array or try local fs if needed, but for Vercel + GitHub CMS we rely on API
+    return []
+  }
 }
 
 export async function saveProject(formData: FormData) {
+  if (!process.env.GITHUB_TOKEN) {
+    throw new Error('GITHUB_TOKEN is not set')
+  }
+
   const title = formData.get('title') as string
   const description = formData.get('description') as string
   const category = formData.get('category') as string
@@ -43,22 +77,30 @@ export async function saveProject(formData: FormData) {
 
   let imageUrl = formData.get('currentImage') as string || ''
 
+  // Handle Image Upload
   if (imageFile && imageFile.size > 0) {
     const buffer = Buffer.from(await imageFile.arrayBuffer())
+    const base64Content = buffer.toString('base64')
     const filename = `${Date.now()}-${imageFile.name.replace(/\s/g, '-')}`
-    
-    try {
-      await fs.access(UPLOAD_DIR)
-    } catch {
-      await fs.mkdir(UPLOAD_DIR, { recursive: true })
-    }
+    const path = `public/uploads/${filename}`
 
-    await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer)
-    imageUrl = `/uploads/${filename}`
+    // Upload image to GitHub
+    await octokit.repos.createOrUpdateFileContents({
+      owner: GITHUB_OWNER,
+      repo: GITHUB_REPO,
+      path: path,
+      message: `Upload image ${filename}`,
+      content: base64Content,
+      branch: GITHUB_BRANCH,
+    })
+
+    // Use jsDelivr for instant global CDN access (bypasses Vercel build delay)
+    imageUrl = `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${GITHUB_REPO}@${GITHUB_BRANCH}/${path}`
   } else if (imageUrlInput) {
     imageUrl = imageUrlInput
   }
 
+  // Handle JSON Update
   const projects = await getProjects()
   
   if (id) {
@@ -79,21 +121,50 @@ export async function saveProject(formData: FormData) {
     projects.push(newProject)
   }
 
-  await fs.writeFile(DATA_FILE_PATH, JSON.stringify(projects, null, 2), 'utf-8')
+  // Save JSON to GitHub
+  const jsonContent = Buffer.from(JSON.stringify(projects, null, 2)).toString('base64')
+  const jsonSha = await getFileSha('data/projects.json')
+
+  await octokit.repos.createOrUpdateFileContents({
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO,
+    path: 'data/projects.json',
+    message: `Update projects data ${new Date().toISOString()}`,
+    content: jsonContent,
+    sha: jsonSha || undefined,
+    branch: GITHUB_BRANCH,
+  })
+
   revalidatePath('/')
   return { success: true }
 }
 
 export async function deleteProject(id: string) {
+  if (!process.env.GITHUB_TOKEN) {
+    throw new Error('GITHUB_TOKEN is not set')
+  }
+
   const projects = await getProjects()
   const filteredProjects = projects.filter(p => p.id !== id)
-  await fs.writeFile(DATA_FILE_PATH, JSON.stringify(filteredProjects, null, 2), 'utf-8')
+
+  const jsonContent = Buffer.from(JSON.stringify(filteredProjects, null, 2)).toString('base64')
+  const jsonSha = await getFileSha('data/projects.json')
+
+  await octokit.repos.createOrUpdateFileContents({
+    owner: GITHUB_OWNER,
+    repo: GITHUB_REPO,
+    path: 'data/projects.json',
+    message: `Delete project ${id}`,
+    content: jsonContent,
+    sha: jsonSha || undefined,
+    branch: GITHUB_BRANCH,
+  })
+
   revalidatePath('/')
   return { success: true }
 }
 
 export async function authenticate(password: string) {
-  // Simple hardcoded password for now
   if (password === 'admin123') {
     return { success: true }
   }
