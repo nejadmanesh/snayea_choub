@@ -34,6 +34,7 @@ export async function saveProject(formData: FormData) {
   const description = formData.get('description') as string
   const category = formData.get('category') as string
   const imageFile = formData.get('image') as File
+  const imageUrlInput = formData.get('imageUrl') as string
   const id = formData.get('id') as string | null
 
   if (!title || !category) {
@@ -54,6 +55,8 @@ export async function saveProject(formData: FormData) {
 
     await fs.writeFile(path.join(UPLOAD_DIR, filename), buffer)
     imageUrl = `/uploads/${filename}`
+  } else if (imageUrlInput) {
+    imageUrl = imageUrlInput
   }
 
   const projects = await getProjects()

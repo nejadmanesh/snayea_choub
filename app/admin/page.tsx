@@ -219,23 +219,42 @@ export default function AdminPage() {
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="image">تصویر</Label>
-                    <div className="flex items-center gap-4">
-                      {editingProject?.image && (
-                        <div className="w-24 h-24 rounded-md overflow-hidden border">
+                  <div className="space-y-4">
+                    <Label>تصویر (آپلود یا لینک)</Label>
+                    
+                    <div className="flex flex-col gap-4 p-4 border rounded-lg bg-gray-50">
+                      <div className="space-y-2">
+                        <Label htmlFor="image" className="text-xs text-gray-500">گزینه ۱: آپلود فایل</Label>
+                        <Input 
+                          id="image" 
+                          name="image" 
+                          type="file" 
+                          accept="image/*" 
+                        />
+                      </div>
+
+                      <div className="text-center text-xs text-gray-400 font-bold">- یا -</div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="imageUrl" className="text-xs text-gray-500">گزینه ۲: لینک مستقیم (مثل گوگل درایو یا اینستاگرام)</Label>
+                        <Input 
+                          id="imageUrl" 
+                          name="imageUrl" 
+                          type="url" 
+                          placeholder="https://..."
+                          defaultValue={editingProject?.image?.startsWith('http') ? editingProject.image : ''}
+                        />
+                      </div>
+                    </div>
+
+                    {editingProject?.image && (
+                      <div className="mt-2">
+                        <p className="text-xs text-muted-foreground mb-2">تصویر فعلی:</p>
+                        <div className="w-full max-w-[200px] aspect-video rounded-md overflow-hidden border">
                           <img src={editingProject.image} alt="Current" className="w-full h-full object-cover" />
                         </div>
-                      )}
-                      <Input 
-                        id="image" 
-                        name="image" 
-                        type="file" 
-                        accept="image/*" 
-                        className="flex-1"
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">اگر تصویر جدید انتخاب نکنید، تصویر قبلی باقی می‌ماند.</p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex gap-4 pt-4">
